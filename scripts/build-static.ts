@@ -6,8 +6,12 @@ import { mkdir, copyFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const dist = 'dist';
-// 清理上次构建残留，保证 dist 与当前源一致
-await rm(dist, { recursive: true, force: true });
+// 仅清理本脚本管理的产物（index.js 由 bun build 在此之前生成，不可删除）
+await Promise.all([
+  rm(join(dist, 'styles'), { recursive: true, force: true }),
+  rm(join(dist, 'assets'), { recursive: true, force: true }),
+  rm(join(dist, 'sw.js'), { force: true }),
+]);
 await mkdir(join(dist, 'styles'), { recursive: true });
 await mkdir(join(dist, 'assets'), { recursive: true });
 
