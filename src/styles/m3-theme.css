@@ -148,9 +148,24 @@ pboc-app {
   align-items: flex-start;
 }
 
-.search-box md-filled-text-field {
+.field-wrap {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-box md-filled-text-field {
+  width: 100%;
+}
+
+/* 字数计数器（按 Unicode 码点计；原生 maxlength 按 UTF-16 码元，扩展区汉字会错算为 2） */
+.char-counter {
+  align-self: flex-end;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface-variant);
+  user-select: none;
 }
 
 .search-box md-filled-button {

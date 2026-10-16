@@ -179,8 +179,28 @@ export class PbocApp extends LitElement {
   }
 
   // ── 搜索 ──
-  private searchDict(updateUrl = true) {
-    const query = this.inputValue.trim();
+  /** 普通模式最大输入字数（按 Unicode 码点计） */
+  private static readonly INPUT_MAX = 100;
+
+  /**
+   * 码点安全的输入处理：超出上限时按码点截断。
+   * 不用原生 maxlength——HTML 規範按 UTF-16 码元计数，扩展区汉字（代理对）会被算成 2 个。
+   */
+  private handleInput(e: Event): void {
+    const el = e.target as HTMLInputElement;
+    const raw = el.value;
+    const max = this.currentMode === 'batch' ? BATCH_MAX_LENGTH : PbocApp.INPUT_MAX;
+    const cps = Array.from(raw);
+    if (cps.length > max) {
+      const value = cps.slice(0, max).join('');
+      el.value = value;
+      this.inputValue = value;
+    } else {
+      this.inputValue = raw;
+    }
+  }
+
+  private searchDict(updateUrl = true) {    const query = this.inputValue.trim();
     this.currentQuery = query;
     this.currentResults = [];
     this.batchRows = null;
@@ -450,19 +470,21 @@ export class PbocApp extends LitElement {
 
       <section class="search-container" role="search">
         <div class="search-box">
-          <md-filled-text-field
-            id="searchInput"
-            .value="${this.inputValue}"
-            placeholder="${this.loading ? '正在加載字庫…' : this.loadError ? '加載字典失敗，請檢查網絡' : this.currentMode === 'batch' && !this.inputValue ? `輸入古文文本（最多${BATCH_MAX_LENGTH}字），自動標注擬音…` : `已加載${recordCount()}條目—請輸入關鍵字`}"
-            ?disabled="${this.loading}"
-            maxlength="${this.currentMode === 'batch' ? BATCH_MAX_LENGTH : 100}"
-            autocomplete="off"
-            spellcheck="false"
-            @input="${(e: InputEvent) => (this.inputValue = (e.target as HTMLInputElement).value)}"
-            @keydown="${(e: KeyboardEvent) => e.key === 'Enter' && !e.isComposing && this.searchDict()}"
-          >
-            <span slot="leading-icon">${icon('search')}</span>
-          </md-filled-text-field>
+          <div class="field-wrap">
+            <md-filled-text-field
+              id="searchInput"
+              .value="${this.inputValue}"
+              placeholder="${this.loading ? '正在加載字庫…' : this.loadError ? '加載字典失敗，請檢查網絡' : this.currentMode === 'batch' && !this.inputValue ? `輸入古文文本（最多${BATCH_MAX_LENGTH}字），自動標注擬音…` : `已加載${recordCount()}條目—請輸入關鍵字`}"
+              ?disabled="${this.loading}"
+              autocomplete="off"
+              spellcheck="false"
+              @input="${(e: InputEvent) => this.handleInput(e)}"
+              @keydown="${(e: KeyboardEvent) => e.key === 'Enter' && !e.isComposing && this.searchDict()}"
+            >
+              <span slot="leading-icon">${icon('search')}</span>
+            </md-filled-text-field>
+            <div class="char-counter" aria-live="polite">${Array.from(this.inputValue).length} / ${this.currentMode === 'batch' ? BATCH_MAX_LENGTH : PbocApp.INPUT_MAX}</div>
+          </div>
           <md-filled-button
             ?disabled="${this.loading}"
             aria-label="${this.loading ? '加載中...' : this.loadError ? '重試' : '查詢'}"
