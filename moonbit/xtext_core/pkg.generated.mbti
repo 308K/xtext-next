@@ -4,7 +4,7 @@ package "local/xtext_core"
 // Values
 pub fn get_json(Int) -> String
 
-pub fn load_dict(FixedArray[Byte]) -> Int
+pub fn load_dict(String) -> Int
 
 pub fn record_count() -> Int
 

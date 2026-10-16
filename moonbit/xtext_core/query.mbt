@@ -8,12 +8,12 @@
 // ============================================================================
 
 ///|
-fn read_u16(b : FixedArray[Byte], addr : Int) -> Int {
+fn read_u16(b : FixedArray[Byte], addr : Int32) -> Int32 {
   b[addr].to_int() | (b[addr + 1].to_int() << 8)
 }
 
 ///|
-fn read_u32(b : FixedArray[Byte], addr : Int) -> Int {
+fn read_u32(b : FixedArray[Byte], addr : Int32) -> Int32 {
   b[addr].to_int() |
   (b[addr + 1].to_int() << 8) |
   (b[addr + 2].to_int() << 16) |
@@ -21,7 +21,7 @@ fn read_u32(b : FixedArray[Byte], addr : Int) -> Int {
 }
 
 ///|
-fn read_u64(b : FixedArray[Byte], addr : Int) -> Int64 {
+fn read_u64(b : FixedArray[Byte], addr : Int32) -> Int64 {
   let lo = Int64::from_int(read_u32(b, addr))
   let hi = Int64::from_int(read_u32(b, addr + 4))
   lo | (hi << 32)
@@ -30,13 +30,18 @@ fn read_u64(b : FixedArray[Byte], addr : Int) -> Int64 {
 ///|
 priv struct Engine {
   mut bytes : FixedArray[Byte]
-  mut count : Int
-  mut table_off : Int
-  mut pool_off : Int
+  mut count : Int32
+  mut table_off : Int32
+  mut pool_off : Int32
 }
 
 ///|
-let engine : Engine = { bytes: FixedArray::make(0, b'\x00'), count: 0, table_off: 0, pool_off: 0 }
+let engine : Engine = {
+  bytes: FixedArray::make(0, b'\x00'),
+  count: 0,
+  table_off: 0,
+  pool_off: 0,
+}
 
 ///|
 fn check_magic(b : FixedArray[Byte]) -> Bool {
@@ -49,8 +54,9 @@ fn check_magic(b : FixedArray[Byte]) -> Bool {
   true
 }
 
-///| length == 0xFFFF 表示字段缺失
-let absent_len : Int = 0xFFFF
+///|
+/// length == 0xFFFF 表示字段缺失
+let absent_len : Int32 = 0xFFFF
 
 ///|
 /// Base64 解码（标准 alphabet，无填充容错）。
@@ -68,7 +74,7 @@ fn base64_decode(s : String) -> FixedArray[Byte] {
       pad += 1
     }
   }
-  let out_len = (n / 4) * 3 - pad
+  let out_len = n / 4 * 3 - pad
   let out = FixedArray::make(out_len, b'\x00')
   let mut oi = 0
   let mut i = 0
@@ -96,7 +102,7 @@ fn base64_decode(s : String) -> FixedArray[Byte] {
 ///|
 /// 装载 dict.bin（base64 编码）。返回记录条数；魔数错误返回 -1。
 #export_name("load_dict")
-pub fn load_dict(b64 : String) -> Int {
+pub fn load_dict(b64 : String) -> Int32 {
   let bytes = base64_decode(b64)
   engine.bytes = bytes
   if bytes.length() < 32 || !check_magic(bytes) {
@@ -112,7 +118,7 @@ pub fn load_dict(b64 : String) -> Int {
 ///|
 /// 记录条数。
 #export_name("record_count")
-pub fn record_count() -> Int {
+pub fn record_count() -> Int32 {
   engine.count
 }
 
@@ -120,29 +126,29 @@ pub fn record_count() -> Int {
 
 ///|
 priv struct Rec {
-  z_off : Int
-  z_len : Int
-  y_off : Int
-  y_len : Int
-  p_off : Int
-  p_len : Int
-  a_off : Int
-  a_len : Int
-  c_off : Int
-  c_len : Int
-  m_off : Int
-  m_len : Int
-  e_off : Int
-  e_len : Int
-  n_off : Int
-  n_len : Int
-  d_off : Int
-  d_len : Int
-  flags : Int
+  z_off : Int32
+  z_len : Int32
+  y_off : Int32
+  y_len : Int32
+  p_off : Int32
+  p_len : Int32
+  a_off : Int32
+  a_len : Int32
+  c_off : Int32
+  c_len : Int32
+  m_off : Int32
+  m_len : Int32
+  e_off : Int32
+  e_len : Int32
+  n_off : Int32
+  n_len : Int32
+  d_off : Int32
+  d_len : Int32
+  flags : Int32
 }
 
 ///|
-fn rec_load(idx : Int) -> Rec {
+fn rec_load(idx : Int32) -> Rec {
   let base = engine.table_off + idx * 56
   let b = engine.bytes
   {
@@ -170,7 +176,7 @@ fn rec_load(idx : Int) -> Rec {
 
 ///|
 /// 从字符串池读取 UTF-8 文本。
-fn pool_str(off : Int, len : Int) -> String {
+fn pool_str(off : Int32, len : Int32) -> String {
   if len == absent_len {
     return ""
   }
@@ -180,24 +186,25 @@ fn pool_str(off : Int, len : Int) -> String {
   while i < len {
     let byte = engine.bytes[start + i].to_int()
     if byte < 0x80 {
-      buf.write_char(Int::unsafe_to_char(byte))
+      buf.write_char(Int32::unsafe_to_char(byte))
       i += 1
     } else if byte < 0xE0 {
-      let c = ((byte & 0x1F) << 6) | (engine.bytes[start + i + 1].to_int() & 0x3F)
-      buf.write_char(Int::unsafe_to_char(c))
+      let c = ((byte & 0x1F) << 6) |
+        (engine.bytes[start + i + 1].to_int() & 0x3F)
+      buf.write_char(Int32::unsafe_to_char(c))
       i += 2
     } else if byte < 0xF0 {
       let c = ((byte & 0x0F) << 12) |
-              ((engine.bytes[start + i + 1].to_int() & 0x3F) << 6) |
-              (engine.bytes[start + i + 2].to_int() & 0x3F)
-      buf.write_char(Int::unsafe_to_char(c))
+        ((engine.bytes[start + i + 1].to_int() & 0x3F) << 6) |
+        (engine.bytes[start + i + 2].to_int() & 0x3F)
+      buf.write_char(Int32::unsafe_to_char(c))
       i += 3
     } else {
       let c = ((byte & 0x07) << 18) |
-              ((engine.bytes[start + i + 1].to_int() & 0x3F) << 12) |
-              ((engine.bytes[start + i + 2].to_int() & 0x3F) << 6) |
-              (engine.bytes[start + i + 3].to_int() & 0x3F)
-      buf.write_char(Int::unsafe_to_char(c))
+        ((engine.bytes[start + i + 1].to_int() & 0x3F) << 12) |
+        ((engine.bytes[start + i + 2].to_int() & 0x3F) << 6) |
+        (engine.bytes[start + i + 3].to_int() & 0x3F)
+      buf.write_char(Int32::unsafe_to_char(c))
       i += 4
     }
   }
@@ -205,15 +212,49 @@ fn pool_str(off : Int, len : Int) -> String {
 }
 
 ///|
-fn rec_z(r : Rec) -> String { pool_str(r.z_off, r.z_len) }
-fn rec_y(r : Rec) -> String { pool_str(r.y_off, r.y_len) }
-fn rec_p(r : Rec) -> String { pool_str(r.p_off, r.p_len) }
-fn rec_a(r : Rec) -> String { pool_str(r.a_off, r.a_len) }
-fn rec_c(r : Rec) -> String { pool_str(r.c_off, r.c_len) }
-fn rec_m(r : Rec) -> String { pool_str(r.m_off, r.m_len) }
-fn rec_e(r : Rec) -> String { pool_str(r.e_off, r.e_len) }
-fn rec_n(r : Rec) -> String { pool_str(r.n_off, r.n_len) }
-fn rec_d(r : Rec) -> String { pool_str(r.d_off, r.d_len) }
+fn rec_z(r : Rec) -> String {
+  pool_str(r.z_off, r.z_len)
+}
+
+///|
+fn rec_y(r : Rec) -> String {
+  pool_str(r.y_off, r.y_len)
+}
+
+///|
+fn rec_p(r : Rec) -> String {
+  pool_str(r.p_off, r.p_len)
+}
+
+///|
+fn rec_a(r : Rec) -> String {
+  pool_str(r.a_off, r.a_len)
+}
+
+///|
+fn rec_c(r : Rec) -> String {
+  pool_str(r.c_off, r.c_len)
+}
+
+///|
+fn rec_m(r : Rec) -> String {
+  pool_str(r.m_off, r.m_len)
+}
+
+///|
+fn rec_e(r : Rec) -> String {
+  pool_str(r.e_off, r.e_len)
+}
+
+///|
+fn rec_n(r : Rec) -> String {
+  pool_str(r.n_off, r.n_len)
+}
+
+///|
+fn rec_d(r : Rec) -> String {
+  pool_str(r.d_off, r.d_len)
+}
 
 // ── 字符串工具 ─────────────────────────────────────────────────────────────
 
@@ -260,22 +301,35 @@ fn str_starts_with(s : String, prefix : String) -> Bool {
   true
 }
 
+///|
+/// 解码 UTF-16 字符串的首个 Unicode 码点（含代理对，支持非 BMP 扩展区汉字）。
+/// 无代理对时返回该码元值；空串返回 -1。
+fn first_codepoint(s : String) -> Int32 {
+  if s.length() == 0 {
+    return -1
+  }
+  let unit = s[0].to_int()
+  if unit >= 0xD800 && unit <= 0xDBFF && s.length() >= 2 {
+    let low = s[1].to_int()
+    if low >= 0xDC00 && low <= 0xDFFF {
+      return 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
+    }
+  }
+  unit
+}
+
 // ── 二分查找（记录表按 z 码点升序） ───────────────────────────────────────
 
 ///|
-fn z_codepoint(idx : Int) -> Int {
+fn z_codepoint(idx : Int32) -> Int32 {
   let r = rec_load(idx)
   let s = rec_z(r)
-  if s.length() == 0 {
-    -1
-  } else {
-    s[0].to_int()
-  }
+  first_codepoint(s)
 }
 
 ///|
 /// 返回码点等于 target 的最小索引；找不到返回 -1。
-fn find_by_z_codepoint(target : Int) -> Int {
+fn find_by_z_codepoint(target : Int32) -> Int32 {
   let mut lo = 0
   let mut hi = engine.count - 1
   let mut result = -1
@@ -297,7 +351,7 @@ fn find_by_z_codepoint(target : Int) -> Int {
 // ── 查询导出 ───────────────────────────────────────────────────────────────
 
 ///|
-fn json_int_array(hits : Array[Int]) -> String {
+fn json_int_array(hits : Array[Int32]) -> String {
   let sb = StringBuilder::new()
   sb.write_char('[')
   for i in 0..<hits.length() {
@@ -317,12 +371,12 @@ pub fn search_z(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let target = query[0].to_int()
+  let target = first_codepoint(query)
   let first = find_by_z_codepoint(target)
   if first < 0 {
     return "[]"
   }
-  let hits : Array[Int] = []
+  let hits : Array[Int32] = []
   let mut i = first
   while i < engine.count && z_codepoint(i) == target {
     hits.push(i)
@@ -338,9 +392,9 @@ pub fn search_exact(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let hits : Array[Int] = Array::new()
+  let hits : Array[Int32] = Array::new()
   let seen = Array::make(engine.count, false)
-  let target = query[0].to_int()
+  let target = first_codepoint(query)
   let first = find_by_z_codepoint(target)
   if first >= 0 {
     let mut i = first
@@ -357,7 +411,10 @@ pub fn search_exact(query : String) -> String {
       continue
     }
     let r = rec_load(i)
-    if rec_y(r) == query || rec_p(r) == query || rec_a(r) == query || rec_m(r) == query {
+    if rec_y(r) == query ||
+      rec_p(r) == query ||
+      rec_a(r) == query ||
+      rec_m(r) == query {
       seen[i] = true
       hits.push(i)
     }
@@ -372,7 +429,7 @@ pub fn search_prefix(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let hits : Array[Int] = []
+  let hits : Array[Int32] = []
   for i in 0..<engine.count {
     let r = rec_load(i)
     if str_starts_with(rec_y(r), query) || str_starts_with(rec_p(r), query) {
@@ -385,11 +442,11 @@ pub fn search_prefix(query : String) -> String {
 ///|
 /// 子串匹配：field 0=z 1=y 2=p 3=a。
 #export_name("search_contains")
-pub fn search_contains(field : Int, query : String) -> String {
+pub fn search_contains(field : Int32, query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let hits : Array[Int] = []
+  let hits : Array[Int32] = []
   for i in 0..<engine.count {
     let r = rec_load(i)
     let matched = match field {
@@ -413,7 +470,7 @@ pub fn search_domain_prefix(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let hits : Array[Int] = []
+  let hits : Array[Int32] = []
   for i in 0..<engine.count {
     let r = rec_load(i)
     if str_starts_with(rec_a(r), query) {
@@ -430,10 +487,12 @@ pub fn search_meaning(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
   }
-  let hits : Array[Int] = []
+  let hits : Array[Int32] = []
   for i in 0..<engine.count {
     let r = rec_load(i)
-    if str_contains(rec_d(r), query) || str_contains(rec_e(r), query) || str_contains(rec_n(r), query) {
+    if str_contains(rec_d(r), query) ||
+      str_contains(rec_e(r), query) ||
+      str_contains(rec_n(r), query) {
       hits.push(i)
     }
   }
@@ -443,7 +502,8 @@ pub fn search_meaning(query : String) -> String {
 ///|
 /// 取回第 idx 条记录的 JSON。
 #export_name("get_json")
-pub fn get_json(idx : Int) -> String {  if idx < 0 || idx >= engine.count {
+pub fn get_json(idx : Int32) -> String {
+  if idx < 0 || idx >= engine.count {
     return "{}"
   }
   let r = rec_load(idx)
@@ -465,13 +525,12 @@ fn json_escape(s : String) -> String {
       0x0A => sb.write_string("\\n")
       0x0D => sb.write_string("\\r")
       0x09 => sb.write_string("\\t")
-      _ => {
+      _ =>
         if c < 0x20 {
           sb.write_string("\\u" + c.to_string())
         } else {
-          sb.write_char(Int::unsafe_to_char(c))
+          sb.write_char(Int32::unsafe_to_char(c))
         }
-      }
     }
   }
   sb.to_string()
@@ -483,23 +542,43 @@ fn record_to_json(r : Rec) -> String {
   sb.write_char('{')
   sb.write_string("\"z\":\"" + json_escape(rec_z(r)) + "\"")
   let y = rec_y(r)
-  if y.length() > 0 { sb.write_string(",\"y\":\"" + json_escape(y) + "\"") }
+  if y.length() > 0 {
+    sb.write_string(",\"y\":\"" + json_escape(y) + "\"")
+  }
   let p = rec_p(r)
-  if p.length() > 0 { sb.write_string(",\"p\":\"" + json_escape(p) + "\"") }
+  if p.length() > 0 {
+    sb.write_string(",\"p\":\"" + json_escape(p) + "\"")
+  }
   let a = rec_a(r)
-  if a.length() > 0 { sb.write_string(",\"a\":\"" + json_escape(a) + "\"") }
+  if a.length() > 0 {
+    sb.write_string(",\"a\":\"" + json_escape(a) + "\"")
+  }
   let c = rec_c(r)
-  if c.length() > 0 { sb.write_string(",\"c\":\"" + json_escape(c) + "\"") }
+  if c.length() > 0 {
+    sb.write_string(",\"c\":\"" + json_escape(c) + "\"")
+  }
   let m = rec_m(r)
-  if m.length() > 0 { sb.write_string(",\"m\":\"" + json_escape(m) + "\"") }
+  if m.length() > 0 {
+    sb.write_string(",\"m\":\"" + json_escape(m) + "\"")
+  }
   let e = rec_e(r)
-  if e.length() > 0 { sb.write_string(",\"e\":\"" + json_escape(e) + "\"") }
+  if e.length() > 0 {
+    sb.write_string(",\"e\":\"" + json_escape(e) + "\"")
+  }
   let n = rec_n(r)
-  if n.length() > 0 { sb.write_string(",\"n\":\"" + json_escape(n) + "\"") }
+  if n.length() > 0 {
+    sb.write_string(",\"n\":\"" + json_escape(n) + "\"")
+  }
   let d = rec_d(r)
-  if d.length() > 0 { sb.write_string(",\"d\":\"" + json_escape(d) + "\"") }
-  if (r.flags & 1) != 0 { sb.write_string(",\"s\":1") }
-  if (r.flags & 2) != 0 { sb.write_string(",\"q\":1") }
+  if d.length() > 0 {
+    sb.write_string(",\"d\":\"" + json_escape(d) + "\"")
+  }
+  if (r.flags & 1) != 0 {
+    sb.write_string(",\"s\":1")
+  }
+  if (r.flags & 2) != 0 {
+    sb.write_string(",\"q\":1")
+  }
   sb.write_char('}')
   sb.to_string()
 }

@@ -155,14 +155,43 @@ export function search(query: string, mode: SearchMode): SearchOutcome {
 
   switch (mode) {
     case 'default': {
-      const hits = searchZ(query);
-      if (hits.length) return { results: hits.map(getRecord).filter((r): r is DictItem => r !== null) };
-
-      if (/^[A-Z]+$/.test(query)) {
-        const domainHits = searchDomainPrefix(query);
-        return { results: domainHits.map(getRecord).filter((r): r is DictItem => r !== null) };
+      // 与原版一致：空白分词；CJK 串逐字拆分（含非 BMP 扩展区汉字）；其余按整 token 处理
+      let tokens: string[] = [];
+      for (const part of query.split(/\s+/)) {
+        if (!part) continue;
+        const matches = part.match(CJK_TOKEN_RE);
+        if (matches) {
+          for (const m of matches) {
+            if (CJK_RE.test(m)) tokens.push(...Array.from(m));
+            else tokens.push(m);
+          }
+        }
       }
-      return { results: [] };
+      if (!tokens.length) tokens = [query];
+
+      const results: DictItem[] = [];
+      const seen = new Set<number>();
+      const push = (idx: number): void => {
+        if (!seen.has(idx)) {
+          seen.add(idx);
+          const rec = getRecord(idx);
+          if (rec) results.push(rec);
+        }
+      };
+      const pushAll = (idxs: number[]): void => { idxs.forEach(push); };
+
+      for (const token of tokens) {
+        const isUpper = /^[A-Z0-9]+$/.test(token);
+        const isHan = CJK_RE.test(token);
+        pushAll(searchZ(token));                        // z 精确（码点级，支持扩展区）
+        pushAll(searchExact(token));                    // y/p/a/m 精确
+        if (isUpper) pushAll(searchContains(3, token)); // 諧聲域包含
+        if (!isHan) {                                   // y/p 子串扫描
+          pushAll(searchContains(1, token));
+          pushAll(searchContains(2, token));
+        }
+      }
+      return { results };
     }
 
     case 'exact': {

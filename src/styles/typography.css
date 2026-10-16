@@ -5,9 +5,10 @@
   -webkit-text-spacing: auto;
   font-feature-settings: "kern" 1, "palt" 1;
 
-  /* PRD §5.2：MD3 字体定义（MiSans 字体分流加载，见 src/core/font-loader.ts） */
-  --md-ref-typeface-brand: 'MiSans', 'MiSans L3', 'Noto Serif SC', 'Songti SC', 'Source Han Serif SC', serif;
-  --md-ref-typeface-plain: 'MiSans', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* PRD §5.2：MD3 字体定义（MiSans 字体分流加载，见 src/core/font-loader.ts）
+     MiSans 未加载时回退到各平台黑体（sans-serif 系），不用宋体 */
+  --md-ref-typeface-brand: 'MiSans', 'MiSans L3', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'HarmonyOS Sans SC', 'Noto Sans SC', sans-serif;
+  --md-ref-typeface-plain: 'MiSans', 'MiSans L3', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* ─── PRD §3.2.2：MiSans 字体链（防 FOUT/FOIT fallback，font-display: swap 由 WebFont CSS 提供） ─── */
