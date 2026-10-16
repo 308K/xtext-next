@@ -1,0 +1,25 @@
+{
+  "name": "xtext-next",
+  "version": "2.0.0",
+  "description": "高性能先秦两汉汉语音韵文献检索系统 (xtext-next)",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target browser --minify && bun run build:static",
+    "build:static": "bun scripts/build-static.ts",
+    "fetch:dict": "bun scripts/fetch-dict-source.ts",
+    "encode:dict": "bun scripts/encode-dict.ts",
+    "test": "bun test",
+    "serve": "bun run build && bun scripts/serve.ts"
+  },
+  "dependencies": {
+    "@material/material-color-utilities": "^0.4.0",
+    "@material/web": "^2.5.0",
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "bun-types": "^1.4.3",
+    "typescript": "^5.5.0"
+  }
+}

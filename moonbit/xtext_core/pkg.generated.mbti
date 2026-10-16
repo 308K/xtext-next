@@ -1,0 +1,29 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "local/xtext_core"
+
+// Values
+pub fn get_json(Int) -> String
+
+pub fn load_dict(FixedArray[Byte]) -> Int
+
+pub fn record_count() -> Int
+
+pub fn search_contains(Int, String) -> String
+
+pub fn search_domain_prefix(String) -> String
+
+pub fn search_exact(String) -> String
+
+pub fn search_meaning(String) -> String
+
+pub fn search_prefix(String) -> String
+
+pub fn search_z(String) -> String
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits

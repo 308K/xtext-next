@@ -1,0 +1,26 @@
+/* ─── PRD §3.2.1：中西文混排微排版间距 ─── */
+:root {
+  text-autospace: normal;
+  /* 针对老旧浏览器特性的渐进增强回退机制 */
+  -webkit-text-spacing: auto;
+  font-feature-settings: "kern" 1, "palt" 1;
+
+  /* PRD §5.2：MD3 字体定义（MiSans 字体分流加载，见 src/core/font-loader.ts） */
+  --md-ref-typeface-brand: 'MiSans', 'MiSans L3', 'Noto Serif SC', 'Songti SC', 'Source Han Serif SC', serif;
+  --md-ref-typeface-plain: 'MiSans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ─── PRD §3.2.2：MiSans 字体链（防 FOUT/FOIT fallback，font-display: swap 由 WebFont CSS 提供） ─── */
+body {
+  font-family: var(--md-ref-typeface-brand);
+}
+
+/* 等宽字段（拟音/拼音）使用系统 mono 字体 */
+.phonetic-value,
+.pinyin-value,
+.derived-value,
+.batch-pinyin,
+.batch-phonetic,
+.batch-domain {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Consolas, monospace;
+}

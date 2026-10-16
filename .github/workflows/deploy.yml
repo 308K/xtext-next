@@ -1,0 +1,63 @@
+name: Build and Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # 1. 安装 MoonBit 工具链并编译 WASM 核心（wasm-gc 目标）
+      - name: Setup MoonBit CLI
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Build MoonBit Engine to WebAssembly
+        run: |
+          moon version
+          cd moonbit/xtext_core
+          moon build --target wasm-gc --release
+          cp _build/wasm-gc/release/build/xtext_core.wasm ../../src/assets/xtext_core.wasm
+
+      # 2. 安装 Bun 环境并构建前端工程
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Frontend Dependencies
+        run: bun install --frozen-lockfile
+
+      # 3. 从上游原始仓库（Qwert-ly/xtext）下载字典源数据并编码为紧凑二进制字库
+      - name: Fetch Dictionary Sources from Upstream
+        run: bun run fetch:dict --force
+
+      - name: Encode Compact Binary Dictionary
+        run: bun run encode:dict
+
+      # 4. 单元测试
+      - name: Run Tests
+        run: bun test
+
+      # 5. 构建前端（产物输出至 dist/）
+      - name: Build Web Application
+        run: bun run build
+
+      # 6. 部署到 Cloudflare Pages（需在仓库 Settings → Secrets 配置两个变量）
+      - name: Deploy to Cloudflare Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=xtext-next
