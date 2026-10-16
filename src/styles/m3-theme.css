@@ -858,7 +858,6 @@ mark.meaning-search-hit {
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in srgb, var(--md-sys-color-primary) 55%, transparent);
 }
 
 .welcome-intro a:hover,
@@ -933,15 +932,6 @@ mark.meaning-search-hit {
   background: var(--md-sys-color-surface-container);
   padding: 1px 4px;
   border-radius: 2px;
-}
-
-.welcome-details a {
-  color: var(--md-sys-color-primary);
-  text-decoration: none;
-}
-
-.welcome-details a:hover {
-  text-decoration: underline;
 }
 
 /* ── 无结果 ───────────────────────────────────────────────────────────── */

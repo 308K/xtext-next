@@ -462,8 +462,7 @@ export class PbocApp extends LitElement {
     return html`
       <header class="page-header">
         <h1>
-          <a href="https://zhuanlan.zhihu.com/p/12987993957" target="_blank" rel="noopener noreferrer"
-             aria-label="Philology-Based Old Chinese（PBOC），基於文獻的上古漢語">
+          <a href="https://zhuanlan.zhihu.com/p/12987993957" target="_blank" rel="noopener noreferrer">
             <span class="project-english-line">Philology-Based Old Chinese</span>
             <span class="project-chinese-line" lang="zh-Hant">基於文獻的上古漢語</span>
             <span class="project-acronym" aria-hidden="true">PBOC</span>
