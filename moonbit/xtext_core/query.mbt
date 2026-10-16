@@ -2,9 +2,11 @@
 // query.mbt —— 检索查询（wasm-gc + JS string builtins ABI）
 // ============================================================================
 //
-// load_dict(bytes) 把宿主 fetch 的 dict.bin 字节数组装入引擎；
+// load_dict(b64) 把宿主 fetch 的 dict.bin 字节数组（经 base64）装入引擎；
 // 查询函数接收 JS string，返回 JSON string（命中索引数组或记录 JSON）。
 // wasm-gc 的 String 即 JS string、FixedArray[Byte] 即 Uint8Array，零拷贝。
+// dict.bin 尾部可选的释义倒排索引（"XTIX" 区 + trailer）由 search_meaning
+// 用于锚点候选过滤；旧格式无索引时自动回退全表扫描。
 // ============================================================================
 
 ///|
@@ -33,6 +35,13 @@ priv struct Engine {
   mut count : Int32
   mut table_off : Int32
   mut pool_off : Int32
+  // 释义倒排索引(d/e/n 并集;idx_off == 0 表示无索引,search_meaning 回退全表扫描)
+  mut idx_off : Int32 // 索引区起始偏移
+  mut idx_chars : Int32 // 字符表条目数
+  mut idx_char_base : Int32 // 字符表起始偏移
+  mut idx_excl : Int32 // 超频排除表条目数
+  mut idx_excl_base : Int32 // 排除表起始偏移
+  mut idx_posting : Int32 // posting varint 流起始偏移
 }
 
 ///|
@@ -41,6 +50,12 @@ let engine : Engine = {
   count: 0,
   table_off: 0,
   pool_off: 0,
+  idx_off: 0,
+  idx_chars: 0,
+  idx_char_base: 0,
+  idx_excl: 0,
+  idx_excl_base: 0,
+  idx_posting: 0,
 }
 
 ///|
@@ -101,10 +116,18 @@ fn base64_decode(s : String) -> FixedArray[Byte] {
 
 ///|
 /// 装载 dict.bin（base64 编码）。返回记录条数；魔数错误返回 -1。
+/// 文件尾部若带释义倒排索引（trailer：最后 8 字节 = 索引区偏移）则一并装载；
+/// 缺失或损坏时静默回退全表扫描。
 #export_name("load_dict")
 pub fn load_dict(b64 : String) -> Int32 {
   let bytes = base64_decode(b64)
   engine.bytes = bytes
+  engine.idx_off = 0
+  engine.idx_chars = 0
+  engine.idx_char_base = 0
+  engine.idx_excl = 0
+  engine.idx_excl_base = 0
+  engine.idx_posting = 0
   if bytes.length() < 32 || !check_magic(bytes) {
     engine.count = 0
     return -1
@@ -112,7 +135,64 @@ pub fn load_dict(b64 : String) -> Int32 {
   engine.count = Int64::to_int(read_u64(bytes, 8))
   engine.table_off = Int64::to_int(read_u64(bytes, 16))
   engine.pool_off = Int64::to_int(read_u64(bytes, 24))
+  load_index(bytes)
   engine.count
+}
+
+///|
+/// 是否已装载释义倒排索引(1 = 是,0 = 否,此时 search_meaning 走全表扫描)。
+#export_name("index_status")
+pub fn index_status() -> Int32 {
+  if engine.idx_off > 0 {
+    1
+  } else {
+    0
+  }
+}
+
+///|
+/// 索引区魔数 "XTIX\0"
+fn check_index_magic(b : FixedArray[Byte], off : Int32) -> Bool {
+  let magic = "XTIX"
+  for i in 0..<4 {
+    if b[off + i].to_int() != magic[i].to_int() {
+      return false
+    }
+  }
+  b[off + 4].to_int() == 0
+}
+
+///|
+/// 解析文件尾部的倒排索引区。缺失、越界或魔数不符时保持 idx_off = 0。
+/// 布局:"XTIX\0" + charCount(u32) + exclCount(u32) + 字符表(10B/条)
+///      + 排除表(8B/条) + posting varint 流,后随 8 字节 trailer(索引区偏移)。
+fn load_index(b : FixedArray[Byte]) -> Unit {
+  let total = b.length()
+  if total < 32 + 13 + 8 {
+    return
+  }
+  let off = Int64::to_int(read_u64(b, total - 8))
+  if off <= 0 || off + 13 > total - 8 || !check_index_magic(b, off) {
+    return
+  }
+  let chars = read_u32(b, off + 5)
+  let excl = read_u32(b, off + 9)
+  // 防御性上限:条目数不可能超过文件长度(每条至少 8 字节),同时避免乘法溢出
+  if chars > total || excl > total {
+    return
+  }
+  let char_base = off + 13
+  let excl_base = char_base + chars * 10
+  let posting = excl_base + excl * 8
+  if posting > total - 8 {
+    return
+  }
+  engine.idx_off = off
+  engine.idx_chars = chars
+  engine.idx_char_base = char_base
+  engine.idx_excl = excl
+  engine.idx_excl_base = excl_base
+  engine.idx_posting = posting
 }
 
 ///|
@@ -481,11 +561,136 @@ pub fn search_domain_prefix(query : String) -> String {
 }
 
 ///|
-/// 释义反查：n/e/d 子串。
+/// 字符表中按码点二分查找(表按码点升序,10 字节/条:[cp u32][len u16][off u32])。
+/// 返回表内下标;找不到返回 -1。
+fn idx_find_char(cp : Int32) -> Int32 {
+  let mut lo = 0
+  let mut hi = engine.idx_chars - 1
+  let mut result = -1
+  while lo <= hi {
+    let mid = lo + (hi - lo) / 2
+    let mid_cp = read_u32(engine.bytes, engine.idx_char_base + mid * 10)
+    if mid_cp < cp {
+      lo = mid + 1
+    } else {
+      if mid_cp == cp {
+        result = mid
+      }
+      hi = mid - 1
+    }
+  }
+  result
+}
+
+///|
+/// 超频排除表中按码点二分查找(8 字节/条:[cp u32][count u32])。
+/// 返回表内下标;找不到返回 -1。
+fn idx_find_excluded(cp : Int32) -> Int32 {
+  let mut lo = 0
+  let mut hi = engine.idx_excl - 1
+  let mut result = -1
+  while lo <= hi {
+    let mid = lo + (hi - lo) / 2
+    let mid_cp = read_u32(engine.bytes, engine.idx_excl_base + mid * 8)
+    if mid_cp < cp {
+      lo = mid + 1
+    } else {
+      if mid_cp == cp {
+        result = mid
+      }
+      hi = mid - 1
+    }
+  }
+  result
+}
+
+///|
+/// 选锚点:遍历查询串的码点(代理对合并),取 posting 最短的已收录字符。
+/// 返回字符表下标;-1 = 查询字符全部超频(回退全表扫描);
+/// -2 = 查询含 d/e/n 语料中完全不存在的字符(直接空结果)。
+fn pick_anchor(query : String) -> Int32 {
+  let mut best = -1
+  let mut best_len = 0
+  let n = query.length()
+  let mut i = 0
+  while i < n {
+    let unit = query[i].to_int()
+    let mut cp = unit
+    if unit >= 0xD800 && unit <= 0xDBFF && i + 1 < n {
+      let low = query[i + 1].to_int()
+      if low >= 0xDC00 && low <= 0xDFFF {
+        cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
+        i += 1
+      }
+    }
+    let ci = idx_find_char(cp)
+    if ci >= 0 {
+      let len = read_u16(engine.bytes, engine.idx_char_base + ci * 10 + 4)
+      if best < 0 || len < best_len {
+        best = ci
+        best_len = len
+      }
+    } else if idx_find_excluded(cp) < 0 {
+      return -2
+    }
+    i += 1
+  }
+  best
+}
+
+///|
+/// 沿锚点 posting(varint 增量)走候选集,逐条对 d/e/n 做完整子串验证。
+/// 候选集是命中记录的超集:含完整查询串必含锚点字符。
+fn collect_meaning_hits(query : String, anchor : Int32) -> Array[Int32] {
+  let entry = engine.idx_char_base + anchor * 10
+  let len = read_u16(engine.bytes, entry + 4)
+  let rel = read_u32(engine.bytes, entry + 6)
+  let mut p = engine.idx_posting + rel
+  let mut id = -1
+  let hits : Array[Int32] = []
+  for _ in 0..<len {
+    // LEB128 varint 解码一个增量
+    let mut delta = 0
+    let mut shift = 0
+    let mut more = true
+    while more {
+      let byte = engine.bytes[p].to_int()
+      p += 1
+      delta = delta | ((byte & 0x7f) << shift)
+      if (byte & 0x80) == 0 {
+        more = false
+      } else {
+        shift += 7
+      }
+    }
+    id = id + delta + 1
+    let r = rec_load(id)
+    if str_contains(rec_d(r), query) ||
+      str_contains(rec_e(r), query) ||
+      str_contains(rec_n(r), query) {
+      hits.push(id)
+    }
+  }
+  hits
+}
+
+///|
+/// 释义反查:n/e/d 子串。优先走固化倒排索引(锚点候选过滤);
+/// 无索引或查询字符全部超频时回退全表扫描,语义不变。
 #export_name("search_meaning")
 pub fn search_meaning(query : String) -> String {
   if engine.count == 0 || query.length() == 0 {
     return "[]"
+  }
+  if engine.idx_off > 0 {
+    let anchor = pick_anchor(query)
+    if anchor == -2 {
+      // 查询含语料外字符,任何记录都不可能包含该查询串
+      return "[]"
+    }
+    if anchor >= 0 {
+      return json_int_array(collect_meaning_hits(query, anchor))
+    }
   }
   let hits : Array[Int32] = []
   for i in 0..<engine.count {

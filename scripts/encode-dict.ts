@@ -1,6 +1,8 @@
 /**
  * dict.bin 编码器 —— 把 base.json.gz + extra.json.gz 打包为紧凑二进制字库
- * 布局与 moonbit/xtext_core/dict.mbt 中定义的格式严格一致。
+ * 布局与 moonbit/xtext_core/query.mbt 中定义的格式严格一致:
+ *   [header 32B][记录表 56B/条][UTF-8 字符串池][释义倒排索引][trailer 8B = 索引区偏移]
+ * 索引区与 trailer 为可选(旧引擎忽略尾部字节;新引擎检测不到则回退全表扫描)。
  *
  * 用法：bun scripts/encode-dict.ts
  * 输入：src/assets/base.json.gz / extra.json.gz（由 scripts/fetch-dict-source.ts 从上游仓库下载）
@@ -74,6 +76,88 @@ const sorted = recs
   .sort((a, b) => a.cp - b.cp || a.idx - b.idx)
   .map(x => x.r);
 
+// ── 释义倒排索引(d/e/n 并集)固化到文件尾部 ─────────────────────
+// search_meaning 对 d/e/n 做子串反查,全表扫描为 O(N) 且每条都要解码字符串。
+// 这里把「字符 → 含该字符的记录 ID(升序)」倒排表固化进 dict.bin:
+// 查询时取 posting 最短的查询字符做锚点,只对候选集做完整子串验证。
+// posting 超过 INDEX_MAX_POSTING 的超频字(之/水/名等)不收录,单独记入排除表——
+// 引擎据此区分「超频字」(回退全扫)与「语料中不存在」(直接返回空)。
+
+/** 收录的 posting 长度上限 */
+const INDEX_MAX_POSTING = 4096;
+
+interface MeaningIndex {
+  /** 收录字符,按码点升序 */
+  chars: Array<{ cp: number; len: number; off: number }>;
+  /** 超频排除字符(posting 过长),按码点升序 */
+  excluded: Array<{ cp: number; count: number }>;
+  /** LEB128 varint 增量 posting 流 */
+  posting: number[];
+}
+
+function pushVarint(out: number[], n: number): void {
+  for (;;) {
+    let b = n & 0x7f;
+    n >>>= 7;
+    if (n) b |= 0x80;
+    out.push(b);
+    if (!n) return;
+  }
+}
+
+function buildMeaningIndex(recs: Rec[]): MeaningIndex {
+  const postings = new Map<number, Set<number>>();
+  recs.forEach((r, i) => {
+    const text = (r.d ?? '') + (r.e ?? '') + (r.n ?? '');
+    for (const ch of text) {
+      const cp = ch.codePointAt(0)!;
+      let ids = postings.get(cp);
+      if (!ids) { ids = new Set(); postings.set(cp, ids); }
+      ids.add(i);
+    }
+  });
+  const entries = [...postings.entries()].sort((a, b) => a[0] - b[0]);
+  const chars: MeaningIndex['chars'] = [];
+  const excluded: MeaningIndex['excluded'] = [];
+  const posting: number[] = [];
+  for (const [cp, ids] of entries) {
+    if (ids.size > INDEX_MAX_POSTING) {
+      excluded.push({ cp, count: ids.size });
+      continue;
+    }
+    const off = posting.length;
+    let prev = -1;
+    for (const id of [...ids].sort((a, b) => a - b)) {
+      pushVarint(posting, id - prev - 1);
+      prev = id;
+    }
+    chars.push({ cp, len: ids.size, off });
+  }
+  return { chars, excluded, posting };
+}
+
+/** 索引区布局:"XTIX\0" + charCount(u32) + exclCount(u32) + 字符表(10B/条) + 排除表(8B/条) + posting 流 */
+function serializeIndex(idx: MeaningIndex): Buffer {
+  const buf = Buffer.alloc(13 + idx.chars.length * 10 + idx.excluded.length * 8 + idx.posting.length);
+  buf.write('XTIX\0', 0, 'ascii');
+  buf.writeUInt32LE(idx.chars.length, 5);
+  buf.writeUInt32LE(idx.excluded.length, 9);
+  let p = 13;
+  for (const c of idx.chars) {
+    buf.writeUInt32LE(c.cp, p);
+    buf.writeUInt16LE(c.len, p + 4);
+    buf.writeUInt32LE(c.off, p + 6);   // 相对 posting 流起始
+    p += 10;
+  }
+  for (const e of idx.excluded) {
+    buf.writeUInt32LE(e.cp, p);
+    buf.writeUInt32LE(e.count, p + 4);
+    p += 8;
+  }
+  for (let i = 0; i < idx.posting.length; i++) buf[p + i] = idx.posting[i];
+  return buf;
+}
+
 // ── 序列化 ──────────────────────────────────────────────────────
 const recordTableSize = sorted.length * RECORD_SIZE;
 const tableOffset = HEADER_SIZE;
@@ -111,12 +195,19 @@ for (let i = 0; i < sorted.length; i++) {
 }
 
 pool.copy(out, poolOffset, 0, poolLen);
-const final = out.subarray(0, poolOffset + poolLen);
+
+// ── 追加释义倒排索引与 trailer ──────────────────────────────────
+const index = buildMeaningIndex(sorted);
+const indexBuf = serializeIndex(index);
+const indexOffset = poolOffset + poolLen;
+const trailer = Buffer.alloc(8);
+trailer.writeBigUInt64LE(BigInt(indexOffset), 0);
+const final = Buffer.concat([out.subarray(0, poolOffset + poolLen), indexBuf, trailer]);
 writeFileSync('src/assets/dict.bin', final);
 
 // 运行时产物：DecompressionStream('gzip') 解压后加载
 const gz = gzipSync(final, { level: 9 });
 writeFileSync('src/assets/dict.bin.gz', gz);
 
-console.log(`✓ dict.bin: ${sorted.length} 记录, ${(final.length / 1024 / 1024).toFixed(2)} MB (pool ${(poolLen / 1024 / 1024).toFixed(2)} MB)`);
+console.log(`✓ dict.bin: ${sorted.length} 记录, ${(final.length / 1024 / 1024).toFixed(2)} MB (pool ${(poolLen / 1024 / 1024).toFixed(2)} MB, 索引 ${(indexBuf.length / 1024).toFixed(0)} KB: ${index.chars.length} 字符 + ${index.excluded.length} 超频排除)`);
 console.log(`✓ dict.bin.gz: ${(gz.length / 1024 / 1024).toFixed(2)} MB`);
