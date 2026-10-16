@@ -9,14 +9,14 @@ declare const self: ServiceWorkerGlobalScope;
 
 const CACHE_PREFIX = 'pboc';
 const SHELL_CACHE = `${CACHE_PREFIX}-shell-v2`;
-const STATIC_CACHE = `${CACHE_PREFIX}-static-v8`;
+const STATIC_CACHE = `${CACHE_PREFIX}-static-v9`;
 const DICT_CACHE_PREFIX = `${CACHE_PREFIX}-dict`;
 
 const scopeUrl = new URL(self.registration.scope);
 const BASE_PATH = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`;
 const SHELL_URLS = [BASE_PATH, `${BASE_PATH}index.html`];
 const STATIC_URLS = [
-  `${BASE_PATH}styles/pboc.css`,
+  `${BASE_PATH}styles/m3-theme.css`,
   `${BASE_PATH}styles/typography.css`,
   `${BASE_PATH}index.js`,
   `${BASE_PATH}manifest.webmanifest`,
@@ -105,6 +105,9 @@ self.addEventListener('fetch', event => {
 
   // 字典 gzip 由应用层 Cache Storage 管理（支持条件更新），SW 不拦截
   if (url.pathname.endsWith('.json.gz')) return;
+
+  // 版本指纹由应用层以 no-store 直取网络（更新检测），SW 不拦截
+  if (url.pathname.endsWith('version.json')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(networkFirstShell(request));

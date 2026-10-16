@@ -19,6 +19,7 @@ import {
   BATCH_MAX_LENGTH,
   type BatchRow,
 } from '../core/moonbit-dict';
+import { startUpdateCheck, applyUpdate as reloadForUpdate } from '../core/update-check';
 import { safeRegex } from '../core/dict-engine';
 import type { DictItem, SearchMode, SortKey } from '../core/dict-engine';
 import { icon, iconString } from './icons';
@@ -78,6 +79,7 @@ export class PbocApp extends LitElement {
   @state() private hasSearched = false;
   @state() private history: HistoryItem[] = this.readSearchHistory();
   @state() private inputValue = '';
+  @state() private updateReady = false;
 
   private pendingUrlPage = 1;
   private dictionaryLoading = false;
@@ -87,6 +89,7 @@ export class PbocApp extends LitElement {
     super.connectedCallback();
     window.addEventListener('popstate', this.loadFromUrl);
     document.addEventListener('keydown', this.globalKeyHandler);
+    startUpdateCheck(() => { this.updateReady = true; });
     void this.initDictionary();
   }
 
@@ -520,6 +523,18 @@ export class PbocApp extends LitElement {
         <div class="regex-error" role="alert" aria-live="assertive">${this.regexError}</div>
       ` : ''}
 
+      ${this.updateReady ? html`
+        <div class="update-bar" role="status" aria-live="polite">
+          <span>檢測到站點已發布新版本</span>
+          <span>
+            <md-text-button aria-label="刷新頁面以載入新版本"
+                            @click="${() => this.applyUpdate()}">立即更新</md-text-button>
+            <md-text-button aria-label="暫不更新,關閉提示"
+                            @click="${() => this.dismissUpdate()}">暫不</md-text-button>
+          </span>
+        </div>
+      ` : ''}
+
       ${!this.hasSearched && this.history.length ? this.renderHistory() : ''}
 
       <main class="results-main" aria-live="polite" aria-label="${this.hasSearched ? '查詢結果' : 'PBOC說明'}">
@@ -541,6 +556,14 @@ export class PbocApp extends LitElement {
         <span>搜索框</span>
       </button>
     `;
+  }
+
+  private applyUpdate(): void {
+    void reloadForUpdate();
+  }
+
+  private dismissUpdate(): void {
+    this.updateReady = false;
   }
 
   private renderHistory() {
